@@ -1,0 +1,60 @@
+#include <iostream>
+#include <cmath>
+#include <cuda_runtime.h>
+
+__global__ void LayerNorm(const float* A, float* B, int rows, int cols) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < rows) {
+        float mean = 0.0f, variance = 0.0f;
+        for (int j = 0; j < cols; j++) {
+            mean += A[row * cols + j];
+        }
+        mean /= cols;
+        for (int j = 0; j < cols; j++) {
+            float diff = A[row * cols + j] - mean;
+            variance += diff * diff;
+        }
+        variance /= cols;
+        float stddev = sqrtf(variance + 1e-7f);
+        for (int j = 0; j < cols; j++) {
+            B[row * cols + j] = (A[row * cols + j] - mean) / stddev;
+        }
+    }
+}
+
+int main() {
+    const int rows = 10, cols = 10;
+    float *A = (float*)malloc(rows * cols * sizeof(float));
+    float *B = (float*)malloc(rows * cols * sizeof(float));
+    for (int i = 0; i < rows * cols; i++) {
+        A[i] = static_cast<float>(rand()) / RAND_MAX;
+    }
+    float *d_a, *d_b;
+    cudaMalloc(&d_a, rows * cols * sizeof(float));
+    cudaMalloc(&d_b, rows * cols * sizeof(float));
+    cudaMemcpy(d_a, A, rows * cols * sizeof(float), cudaMemcpyHostToDevice);
+    int blockSize = 256;
+    int gridSize = (rows + blockSize - 1) / blockSize;
+    LayerNorm<<<gridSize, blockSize>>>(d_a, d_b, rows, cols);
+    cudaDeviceSynchronize();
+    cudaMemcpy(B, d_b, rows * cols * sizeof(float), cudaMemcpyDeviceToHost);
+    printf("A:\n");
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++) {
+            printf("%.2f ", A[i * cols + j]);
+        }
+        printf("\n");
+    }
+    printf("\nB (Layer Normalized):\n");
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < cols; j++) {
+            printf("%.2f ", B[i * cols + j]);
+        }
+        printf("\n");
+    }
+    cudaFree(d_a);
+    cudaFree(d_b);
+    free(A);
+    free(B);
+    return 0;
+}
